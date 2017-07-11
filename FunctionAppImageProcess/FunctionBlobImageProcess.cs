@@ -16,7 +16,7 @@ namespace FunctionAppImageProcess
     public static class FunctionBlobImageProcess
     {
         [FunctionName("BlobTriggerImageProcess")]
-        public static async Task Run([BlobTrigger("testinput/{name}", Connection = "AzureWebJobsStorage")]Stream myBlob, [Blob("testoutput/{name}", FileAccess.ReadWrite, Connection = "AzureWebJobsStorage")]CloudBlockBlob outputBlob, string name, TraceWriter log)
+        public static async Task Run([BlobTrigger("inputcontainer/{name}", Connection = "AzureWebJobsStorage")]Stream myBlob, [Blob("outputcontainer/{name}", FileAccess.ReadWrite, Connection = "AzureWebJobsStorage")]CloudBlockBlob outputBlob, string name, TraceWriter log)
         {
             // Start the HandleFile method.
             Task<(string containsTransformer, string containsPole)> customVisionTask = PassCustomVisionAsync(myBlob);

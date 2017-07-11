@@ -1,10 +1,10 @@
 ﻿{
     "IsEncrypted": false,
     "Values": {
-        "AzureWebJobsStorage": "",
-        "AzureWebJobsDashboard": "",
-        "predictionKey": "",
-        "projectId": "",
-        "visionSubscriptionKey": ""
+        "AzureWebJobsStorage": "", // your storage account that contains your Blob Storage containers 
+        "AzureWebJobsDashboard": "", // your storage account connection key for your azure function dashboard
+        "predictionKey": "", // your customvision.ai key
+        "projectId": "", // your customvision.ai project Guid
+        "visionSubscriptionKey": "" // your Cogntive Services Computer Vision API Key
     }
 }
