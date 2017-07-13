@@ -10,6 +10,9 @@ using Microsoft.Cognitive.CustomVision;
 using Microsoft.ProjectOxford.Vision;
 using Microsoft.ProjectOxford.Vision.Contract;
 using System.Text;
+using System.Linq;
+using Microsoft.Azure.Documents;
+using Microsoft.Azure.Documents.Client;
 
 namespace FunctionAppImageProcess
 {
@@ -18,6 +21,8 @@ namespace FunctionAppImageProcess
         [FunctionName("BlobTriggerImageProcess")]
         public static async Task Run([BlobTrigger("inputcontainer/{name}", Connection = "AzureWebJobsStorage")]Stream myBlob, [Blob("outputcontainer/{name}", FileAccess.ReadWrite, Connection = "AzureWebJobsStorage")]CloudBlockBlob outputBlob, string name, TraceWriter log)
         {
+            
+
             // Start the HandleFile method.
             Task<(string containsTransformer, string containsPole)> customVisionTask = PassCustomVisionAsync(myBlob);
             Task<(string tags, string dominantColours, string accentColour, string isOnFire)> cognitiveVisionTask = PassCognitiveAsync(myBlob);
@@ -43,35 +48,68 @@ namespace FunctionAppImageProcess
 
             outputBlob.Properties.ContentType = MimeTypeMap.GetMimeType(extStr);
 
-            if (ocrTask.Result.ocrTxt != null)
+            ImageMetadata imgData = new ImageMetadata
             {
-                outputBlob.Metadata["ocrTxt"] = ocrTask.Result.ocrTxt;
-                outputBlob.Metadata["hasHighVoltageSign"] = ocrTask.Result.hasHighVoltageSign;
-                outputBlob.Metadata["hasLiveElectricalSign"] = ocrTask.Result.hasLiveElectricalSign;
-                outputBlob.Metadata["hasLiveWiresSign"] = ocrTask.Result.hasLiveWiresSign;
-            }
-            if (cognitiveVisionTask.Result.tags != null)
-            {
-                outputBlob.Metadata["tags"] = cognitiveVisionTask.Result.tags;
-                outputBlob.Metadata["dominantColours"] = cognitiveVisionTask.Result.dominantColours;
-                outputBlob.Metadata["accentColour"] = cognitiveVisionTask.Result.accentColour;
-                outputBlob.Metadata["isOnFire"] = cognitiveVisionTask.Result.isOnFire;
-            }
+                name = name,
+                ocrTxt = ocrTask.Result.ocrTxt,
+                hasHighVoltageSign = ocrTask.Result.hasHighVoltageSign,
+                hasLiveElectricalSign = ocrTask.Result.hasLiveElectricalSign,
+                hasLiveWiresSign = ocrTask.Result.hasLiveWiresSign,
+                tags = cognitiveVisionTask.Result.tags,
+                dominantColours = cognitiveVisionTask.Result.dominantColours,
+                accentColour = cognitiveVisionTask.Result.accentColour,
+                isOnFire = cognitiveVisionTask.Result.isOnFire,
+                containsTransformer = customVisionTask.Result.containsTransformer,
+                containsPole = customVisionTask.Result.containsPole,
+                exifCaptureDate = exifCaptureDate,
+                exifCaptureTime = exifCaptureTime,
+                exifLatGPS = exifLatGPS,
+                exifLongGPS = exifLongGPS
+            };
 
-            outputBlob.Metadata["containsTransformer"] = customVisionTask.Result.containsTransformer;
-            outputBlob.Metadata["containsPole"] = customVisionTask.Result.containsPole;
 
-            outputBlob.Metadata["exifCaptureDate"] = exifCaptureDate;
-            outputBlob.Metadata["exifCaptureTime"] = exifCaptureTime;
-            outputBlob.Metadata["exifLatGPS"] = exifLatGPS;
-            outputBlob.Metadata["exifLongGPS"] = exifLongGPS;
+            outputBlob.Metadata["ocrTxt"] = imgData.ocrTxt;
+            outputBlob.Metadata["hasHighVoltageSign"] = imgData.hasHighVoltageSign;
+            outputBlob.Metadata["hasLiveElectricalSign"] = imgData.hasLiveElectricalSign;
+            outputBlob.Metadata["hasLiveWiresSign"] = imgData.hasLiveWiresSign;
+            outputBlob.Metadata["tags"] = imgData.tags;
+            outputBlob.Metadata["dominantColours"] = imgData.dominantColours;
+            outputBlob.Metadata["accentColour"] = imgData.accentColour;
+            outputBlob.Metadata["isOnFire"] = imgData.isOnFire;
+            outputBlob.Metadata["containsTransformer"] = imgData.containsTransformer;
+            outputBlob.Metadata["containsPole"] = imgData.containsPole;
+            outputBlob.Metadata["exifCaptureDate"] = imgData.exifCaptureDate;
+            outputBlob.Metadata["exifCaptureTime"] = imgData.exifCaptureTime;
+            outputBlob.Metadata["exifLatGPS"] = imgData.exifLatGPS;
+            outputBlob.Metadata["exifLongGPS"] = imgData.exifLongGPS;
 
             outputBlob.SetProperties();
             outputBlob.SetMetadata();
         }
 
+        private class ImageMetadata
+        {
+            public string name { get; set; }
+            public string ocrTxt { get; set; }
+            public string hasHighVoltageSign { get; set; }
+            public string hasLiveElectricalSign { get; set; }
+            public string hasLiveWiresSign { get; set; }
+            public string tags { get; set; }
+            public string dominantColours { get; set; }
+            public string accentColour { get; set; }
+            public string isOnFire { get; set; }
+            public string containsTransformer { get; set; }
+            public string containsPole { get; set; }
+            public string exifCaptureDate { get; set; }
+            public string exifCaptureTime { get; set; }
+            public string exifLatGPS { get; set; }
+            public string exifLongGPS { get; set; }
+        }
+
         private static async Task<(string, string, string, string)> PassOCRAsync(Stream image)
         {
+            object _locker = new object();
+
             string ocrTxt = ".";
             bool hasHighVoltageSign = false;
             bool hasLiveElectricalSign = false;
@@ -79,10 +117,14 @@ namespace FunctionAppImageProcess
             using (MemoryStream ms = new MemoryStream())
             {
                 // create new memory stream so we don't have threading issues passing around the same stream
-                image.Position = 0;
-                image.CopyTo(ms);
-                ms.Position = 0;
-                image.Position = 0;
+                lock (_locker)
+                {
+                    // perform the copy an reset process on the stream inside a lock to be thread safe
+                    image.Position = 0;
+                    image.CopyTo(ms);
+                    ms.Position = 0;
+                    image.Position = 0;
+                }
 
                 try
                 {
@@ -112,6 +154,8 @@ namespace FunctionAppImageProcess
 
         private static async Task<(string, string, string, string)> PassCognitiveAsync(Stream image)
         {
+            object _locker = new object();
+
             string tags = ".";
             string dominantColours = ".";
             string accentColour = ".";
@@ -119,10 +163,14 @@ namespace FunctionAppImageProcess
             using (MemoryStream ms = new MemoryStream())
             {
                 // create new memory stream so we don't have threading issues passing around the same stream
-                image.Position = 0;
-                image.CopyTo(ms);
-                ms.Position = 0;
-                image.Position = 0;
+                lock (_locker)
+                {
+                    // perform the copy an reset process on the stream inside a lock to be thread safe
+                    image.Position = 0;
+                    image.CopyTo(ms);
+                    ms.Position = 0;
+                    image.Position = 0;
+                }
 
                 try
                 {
@@ -134,14 +182,8 @@ namespace FunctionAppImageProcess
                     dominantColours = string.Join(",", cogTags.Color.DominantColors);
                     accentColour = "#" + cogTags.Color.AccentColor;
 
-                    foreach (string tag in cogTags.Description.Tags)
-                    {
-                        if ((tag == "fire") || (tag == "flame"))
-                        {
-                            // fire or flames are detected in the image - flag the image and trigger SMS workflow
-                            isOnFire = true;
-                        }
-                    }
+                    // fire or flames are detected in the image - flag the image and trigger SMS workflow
+                    isOnFire = cogTags.Description.Tags.Take(5).Contains("fire") || cogTags.Description.Tags.Take(5).Contains("flame");
 
                 }
                 catch (Exception e)
@@ -153,6 +195,8 @@ namespace FunctionAppImageProcess
 
         private static async Task<(string, string)> PassCustomVisionAsync(Stream image)
         {
+            object _locker = new object();
+
             bool containsTransformer = false;
             bool containsPole = false;
 
@@ -162,11 +206,14 @@ namespace FunctionAppImageProcess
                 using (MemoryStream ms = new MemoryStream())
                 {
                     // create new memory stream so we don't have threading issues passing around the same stream
-
-                    image.Position = 0;
-                    image.CopyTo(ms);
-                    ms.Position = 0;
-                    image.Position = 0;
+                    lock (_locker)
+                    {
+                        // perform the copy an reset process on the stream inside a lock to be thread safe
+                        image.Position = 0;
+                        image.CopyTo(ms);
+                        ms.Position = 0;
+                        image.Position = 0;
+                    }
 
                     try
                     {
