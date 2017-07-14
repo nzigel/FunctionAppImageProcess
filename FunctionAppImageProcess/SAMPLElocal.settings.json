@@ -1,10 +1,16 @@
 ﻿{
     "IsEncrypted": false,
     "Values": {
-        "AzureWebJobsStorage": "", // your storage account that contains your Blob Storage containers 
+        "AzureWebJobsStorage": "", // your storage account that contains your Blob Storage containers
         "AzureWebJobsDashboard": "", // your storage account connection key for your azure function dashboard
         "predictionKey": "", // your customvision.ai key
         "projectId": "", // your customvision.ai project Guid
-        "visionSubscriptionKey": "" // your Cogntive Services Computer Vision API Key
+        "visionSubscriptionKey": "", // your Cogntive Services Computer Vision API Key
+        "DB": "", // your document db name
+        "COLLECTION": "", // your document db collection
+        "ENDPOINT": "", // your document db endpoint
+        "KEY": "", // your document db key
+        "docDBConnectionString": "", // your document DB connection string
+        "queue-name": "inputqueue" // the name of your input queue
     }
 }
