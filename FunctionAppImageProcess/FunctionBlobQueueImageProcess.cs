@@ -1,116 +1,47 @@
-﻿using System.IO;
-using Microsoft.Azure.WebJobs;
-using Microsoft.Azure.WebJobs.Host;
-using System.Threading.Tasks;
-using Microsoft.WindowsAzure.Storage.Blob;
-using MimeTypes;
-using ExifLib;
 using System;
-using Microsoft.Cognitive.CustomVision;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using Microsoft.Azure.WebJobs;
 using Microsoft.ProjectOxford.Vision;
+using ExifLib;
+using Microsoft.Cognitive.CustomVision;
 using Microsoft.ProjectOxford.Vision.Contract;
 using System.Text;
-using System.Linq;
-using Newtonsoft.Json;
 
 namespace FunctionAppImageProcess
 {
-    public static class FunctionBlobImageProcess
+    public static class FunctionBlobQueueImageProcess
     {
-        // Function that takes an blob image from an input container and writes metadata back as an attribute and saves the image into an output container.
-        [FunctionName("BlobTriggerImageProcess")]
-        public static async Task Run([BlobTrigger("inputcontainer/{name}", Connection = "AzureWebJobsStorage")]Stream image, [Blob("outputcontainer/{name}", FileAccess.ReadWrite, Connection = "AzureWebJobsStorage")]CloudBlockBlob outputBlob, string name, TraceWriter log)
+        // Function that takes an object from a queue with a link to a DocumentDB document and an Image Blob - writes metadata back to the document in document DB
+        [FunctionName("ProcessImageMetadata")]
+        public static async Task ReviewImageAndText(
+            [QueueTrigger("%queue-name%", Connection = "AzureWebJobsStorage")]  RequestItem queueInput,
+            [Blob("images/{BlobName}", FileAccess.Read, Connection = "AzureWebJobsStorage")]  Stream image,
+            [DocumentDB("db", "imageCollection", Id = "{DocumentId}", ConnectionStringSetting = "docDBConnectionString")]  dynamic inputDocument)
         {
             // Start the HandleFile method.
-            Task<(bool containsTransformer, bool containsPole)> customVisionTask = PassCustomVisionAsync(image);
-            Task<(string tags, string dominantColours, string accentColour, bool isOnFire)> cognitiveVisionTask = PassCognitiveAsync(image);
-            Task<(string ocrTxt, bool hasHighVoltageSign, bool hasLiveElectricalSign, bool hasLiveWiresSign)> ocrTask = PassOCRAsync(image);
-
+            (bool containsTransformer, bool containsPole) customVisionTask = await PassCustomVisionAsync(image);
+            (string tags, string dominantColours, string accentColour, bool isOnFire) cognitiveVisionTask = await PassCognitiveAsync(image);
+            (string ocrTxt, bool hasHighVoltageSign, bool hasLiveElectricalSign, bool hasLiveWiresSign) ocrTask = await PassOCRAsync(image);
             (string exifCaptureDate, string exifCaptureTime, string exifLatGPS, string exifLongGPS) = SetGPSTags(image);
 
-            string extStr = "";
-            try
-            {
-                extStr = name.Split('.')[name.Split('.').Length - 1].ToLower();
-            }
-            catch (Exception e)
-            {
-                log.Info($"Mime Exception: {e.ToString()}");
-            }
-
-            customVisionTask.Wait(); // ensure that the custom vision process is complete
-            cognitiveVisionTask.Wait(); //ensure that the cognitive services process is complete
-            ocrTask.Wait(); // ensure the OCR task is complete
-
-            await outputBlob.UploadFromStreamAsync(image);
-
-            outputBlob.Properties.ContentType = MimeTypeMap.GetMimeType(extStr);
-
-            ImageMetadata imgData = new ImageMetadata
-            {
-                MediaUrl = name,
-                OcrTxt = ocrTask.Result.ocrTxt,
-                HasHighVoltageSign = ocrTask.Result.hasHighVoltageSign,
-                HasLiveElectricalSign = ocrTask.Result.hasLiveElectricalSign,
-                HasLiveWiresSign = ocrTask.Result.hasLiveWiresSign,
-                Tags = cognitiveVisionTask.Result.tags,
-                DominantColours = cognitiveVisionTask.Result.dominantColours,
-                AccentColour = cognitiveVisionTask.Result.accentColour,
-                IsOnFire = cognitiveVisionTask.Result.isOnFire,
-                ContainsTransformer = customVisionTask.Result.containsTransformer,
-                ContainsPole = customVisionTask.Result.containsPole,
-                ExifCaptureDate = exifCaptureDate,
-                ExifCaptureTime = exifCaptureTime,
-                ExifLatGPS = exifLatGPS,
-                ExifLongGPS = exifLongGPS
-            };
-
-
-            outputBlob.Metadata["ocrTxt"] = imgData.OcrTxt;
-            outputBlob.Metadata["hasHighVoltageSign"] = imgData.HasHighVoltageSign.ToString();
-            outputBlob.Metadata["hasLiveElectricalSign"] = imgData.HasLiveElectricalSign.ToString();
-            outputBlob.Metadata["hasLiveWiresSign"] = imgData.HasLiveWiresSign.ToString();
-            outputBlob.Metadata["tags"] = imgData.Tags;
-            outputBlob.Metadata["dominantColours"] = imgData.DominantColours;
-            outputBlob.Metadata["accentColour"] = imgData.AccentColour;
-            outputBlob.Metadata["isOnFire"] = imgData.IsOnFire.ToString();
-            outputBlob.Metadata["containsTransformer"] = imgData.ContainsTransformer.ToString();
-            outputBlob.Metadata["containsPole"] = imgData.ContainsPole.ToString();
-            outputBlob.Metadata["exifCaptureDate"] = imgData.ExifCaptureDate;
-            outputBlob.Metadata["exifCaptureTime"] = imgData.ExifCaptureTime;
-            outputBlob.Metadata["exifLatGPS"] = imgData.ExifLatGPS;
-            outputBlob.Metadata["exifLongGPS"] = imgData.ExifLongGPS;
-
-            outputBlob.SetProperties();
-            outputBlob.SetMetadata();
+            inputDocument.OcrTxt = ocrTask.ocrTxt;
+            inputDocument.HasHighVoltageSign = ocrTask.hasHighVoltageSign;
+            inputDocument.HasLiveElectricalSign = ocrTask.hasLiveElectricalSign;
+            inputDocument.HasLiveWiresSign = ocrTask.hasLiveWiresSign;
+            inputDocument.Tags = cognitiveVisionTask.tags;
+            inputDocument.DominantColours = cognitiveVisionTask.dominantColours;
+            inputDocument.AccentColour = cognitiveVisionTask.accentColour;
+            inputDocument.IsOnFire = cognitiveVisionTask.isOnFire;
+            inputDocument.ContainsTransformer = customVisionTask.containsTransformer;
+            inputDocument.ContainsPole = customVisionTask.containsPole;
+            inputDocument.ExifCaptureDate = exifCaptureDate;
+            inputDocument.ExifCaptureTime = exifCaptureTime;
+            inputDocument.ExifLatGPS = exifLatGPS;
+            inputDocument.ExifLongGPS = exifLongGPS;
 
         }
-
-        private class ImageMetadata
-        {
-            [JsonProperty(PropertyName = "id")]
-            public Guid Id { get; set; }
-
-            public string MediaUrl { get; set; }
-
-            public string OcrTxt { get; set; }
-            public bool? HasHighVoltageSign { get; set; }
-            public bool? HasLiveElectricalSign { get; set; }
-            public bool? HasLiveWiresSign { get; set; }
-            public string Tags { get; set; }
-            public string DominantColours { get; set; }
-            public string AccentColour { get; set; }
-            public bool? IsOnFire { get; set; }
-            public bool? ContainsTransformer { get; set; }
-            public bool? ContainsPole { get; set; }
-            public string ExifCaptureDate { get; set; }
-            public string ExifCaptureTime { get; set; }
-            public string ExifLatGPS { get; set; }
-            public string ExifLongGPS { get; set; }
-
-            public DateTime Created { get; set; }
-        }
-
         private static async Task<(string, bool, bool, bool)> PassOCRAsync(Stream image)
         {
             object _locker = new object();
@@ -344,5 +275,12 @@ namespace FunctionAppImageProcess
             }
             return stringBuilder.ToString();
         }
-    }
+    
+
+        public class RequestItem
+            {
+                public string DocumentId { get; set; }
+                public string BlobName { get; set; }
+            }
+        }
 }
